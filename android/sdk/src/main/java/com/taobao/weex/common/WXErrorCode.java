@@ -223,6 +223,7 @@ public enum WXErrorCode {
   WX_RENDER_ERR_EAGLE_CREATE_PAGE("-9630", "eagleRenderErr, js stack ->",ErrorType.RENDER_ERROR,ErrorGroup.JS),
 
 
+  WX_KEY_EXCEPTION_NO_BUNDLE_TYPE("-9801", "Fatal Error : No bundle type in js bundle head, cause white screen or memory leak!!", ErrorType.JS_ERROR, ErrorGroup.JS),
   /**
    * degrade code.
    */

@@ -1347,7 +1347,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
   private void invokeRefreshInstance(String instanceId, WXRefreshData refreshData) {
     try {
       WXSDKInstance instance = WXSDKManager.getInstance().getSDKInstance(instanceId);
-      if (!isJSFrameworkInit()) {
+      if (!isSkipFrameworkInit(instanceId) && !isJSFrameworkInit()) {
         if (instance != null) {
           instance.onRenderError(
                   WXErrorCode.WX_DEGRAD_ERR_INSTANCE_CREATE_FAILED.getErrorCode(),
@@ -1404,6 +1404,18 @@ public class WXBridgeManager implements Callback, BactchExecutor {
     }
   }
 
+  private boolean isSkipFrameworkInit(String instanceId) {
+    final WXSDKInstance instance = WXSDKManager.getInstance().getSDKInstance(instanceId);
+    return isSkipFrameworkInit(instance);
+  }
+
+  private boolean isSkipFrameworkInit(WXSDKInstance instance) {
+    if (instance == null) {
+      return false;
+    }
+    return instance.skipFrameworkInit();
+  }
+
   /**
    * Create instance.
    */
@@ -1428,7 +1440,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
       return;
     }
 
-    if (!isJSFrameworkInit() && reInitCount == 1 && !WXEnvironment.sDebugServerConnectable) {
+    if (!isSkipFrameworkInit(instanceId) && !isJSFrameworkInit() && reInitCount == 1 && !WXEnvironment.sDebugServerConnectable) {
       instance.onRenderError(
               WXErrorCode.WX_DEGRAD_ERR_INSTANCE_CREATE_FAILED.getErrorCode(),
               WXErrorCode.WX_DEGRAD_ERR_INSTANCE_CREATE_FAILED.getErrorMsg() +
@@ -1459,12 +1471,14 @@ public class WXBridgeManager implements Callback, BactchExecutor {
   private void invokeCreateInstance(@NonNull WXSDKInstance instance, Script template,
                                     Map<String, Object> options, String data) {
     // add for sandbox, will delete on sandbox ok
-    initFramework("");
+    if (!isSkipFrameworkInit(instance)){
+      initFramework("");
+    }
 
     if (mMock) {
       mock(instance.getInstanceId());
     } else {
-      if (!isJSFrameworkInit()) {
+      if (!isSkipFrameworkInit(instance) && !isJSFrameworkInit()) {
         String err = "[WXBridgeManager] invokeCreateInstance: framework.js uninitialized.";
         instance.onRenderError(
                 WXErrorCode.WX_DEGRAD_ERR_INSTANCE_CREATE_FAILED.getErrorCode(),
@@ -1604,6 +1618,15 @@ public class WXBridgeManager implements Callback, BactchExecutor {
           }
           return;
         } else {
+          //bad case for js bundle with out bundletype header //vue or rax
+          WXExceptionUtils.commitCriticalExceptionRT(
+                instance.getInstanceId(),
+                WXErrorCode.WX_KEY_EXCEPTION_NO_BUNDLE_TYPE,
+                "invokeCreateInstance",
+                WXErrorCode.WX_KEY_EXCEPTION_NO_BUNDLE_TYPE.getErrorMsg(),
+                null
+          );
+
           invokeExecJS(instance.getInstanceId(), null, METHOD_CREATE_INSTANCE, args, false);
           return;
         }
@@ -1740,7 +1763,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
       WXJSObject instanceIdObj = new WXJSObject(WXJSObject.String,
               instanceId);
       WXJSObject[] args = {instanceIdObj};
-      if (isJSFrameworkInit()) {
+      if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
         invokeDestoryInstance(instanceId, null, METHOD_DESTROY_INSTANCE, args, true);
         // invokeExecJS(instanceId, null, METHOD_DESTROY_INSTANCE, args);
       }
@@ -1886,7 +1909,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
     WXLogUtils.d(mLodBuilder.substring(0));
     mLodBuilder.setLength(0);
     // }
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       return mWXBridge.execJSOnInstance(instanceId, js, type);
     }
     return null;
@@ -1903,7 +1926,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
       WXLogUtils.d(mLodBuilder.substring(0));
       mLodBuilder.setLength(0);
     }
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.execJSWithCallback(instanceId, namespace, function, args, callback);
     }
   }
@@ -2370,7 +2393,9 @@ public class WXBridgeManager implements Callback, BactchExecutor {
       exception +=   "\n getTemplateInfo==" +instance.getTemplateInfo();//add network header info
       if ((METHOD_CREATE_INSTANCE.equals(function) || METHOD_UPDATE_COMPONENT_WITH_DATA.equals(function) || METHOD_CREATE_PAGE_WITH_CONTENT.equals(function)) || !instance.isContentMd5Match()) {
         try {
-          if (isJSFrameworkInit() && (reInitCount > 1 && reInitCount < 10) && !instance.isNeedReLoad()) {
+          //data render mode should report exception instead of reload page,
+          // so we use !isSkipFrameworkInit(instanceId) to skip the positive branch of if clause.
+          if (!isSkipFrameworkInit(instanceId) && isJSFrameworkInit() && (reInitCount > 1 && reInitCount < 10) && !instance.isNeedReLoad()) {
             new ActionReloadPage(instanceId, true).executeAction();
             instance.setNeedLoad(true);
             return;
@@ -2398,7 +2423,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
               if (METHOD_CREATE_INSTANCE.equals(function)){
                 errCode = WXErrorCode.WX_RENDER_ERR_JS_CREATE_INSTANCE;
               } else {
-                errCode = WXErrorCode.WX_RENDER_ERR_EAGLE_CREATE_PAGE;
+                errCode = WXErrorCode.WX_DEGRAD_EAGLE_RENDER_ERROR;
               }
               WXExceptionUtils.commitCriticalExceptionRT(instanceId,errCode,function,exception,null);
             }
@@ -2413,7 +2438,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
       } else if ( METHOD_CREATE_INSTANCE_CONTEXT.equals(function) && !instance.getApmForInstance().hasAddView){
         reportErrorCode = WXErrorCode.WX_RENDER_ERR_JS_CREATE_INSTANCE_CONTEXT;
       } else if ((METHOD_UPDATE_COMPONENT_WITH_DATA.equals(function) || METHOD_CREATE_PAGE_WITH_CONTENT.equals(function)) && !instance.getApmForInstance().hasAddView){
-        reportErrorCode = WXErrorCode.WX_RENDER_ERR_EAGLE_CREATE_PAGE;
+        reportErrorCode = WXErrorCode.WX_DEGRAD_EAGLE_RENDER_ERROR;
       }
       instance.onJSException(reportErrorCode.getErrorCode(), function, exception);
     }
@@ -3102,7 +3127,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
    */
   @UiThread
   public boolean notifyLayout(String instanceId) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       return mWXBridge.notifyLayout(instanceId);
     }
     return false;
@@ -3110,7 +3135,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
 
   @UiThread
   public void forceLayout(String instanceId) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.forceLayout(instanceId);
     }
   }
@@ -3121,7 +3146,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
    * @param instanceId
    */
   public void onInstanceClose(String instanceId) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.onInstanceClose(instanceId);
     }
   }
@@ -3133,7 +3158,7 @@ public class WXBridgeManager implements Callback, BactchExecutor {
    * @param defaultHeight
    */
   public void setDefaultRootSize(final String instanceId, final float defaultWidth, final float defaultHeight, final boolean isWidthWrapContent, final boolean isHeightWrapContent) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.setDefaultHeightAndWidthIntoRootDom(instanceId, defaultWidth, defaultHeight, isWidthWrapContent, isHeightWrapContent);
     }
   }
@@ -3145,13 +3170,13 @@ public class WXBridgeManager implements Callback, BactchExecutor {
   }
 
   public void setStyleWidth(String instanceId, String ref, float value) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.setStyleWidth(instanceId, ref, value);
     }
   }
 
   public void setStyleHeight(String instanceId, String ref, float value) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.setStyleHeight(instanceId, ref, value);
     }
   }
@@ -3171,25 +3196,25 @@ public class WXBridgeManager implements Callback, BactchExecutor {
   }
 
   public void setMargin(String instanceId, String ref, CSSShorthand.EDGE edge, float value) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.setMargin(instanceId, ref, edge, value);
     }
   }
 
   public void setPadding(String instanceId, String ref, CSSShorthand.EDGE edge, float value) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.setPadding(instanceId, ref, edge, value);
     }
   }
 
   public void setPosition(String instanceId, String ref, CSSShorthand.EDGE edge, float value) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.setPosition(instanceId, ref, edge, value);
     }
   }
 
   public void markDirty(String instanceId, String ref, boolean dirty) {
-    if (isJSFrameworkInit()) {
+    if (isSkipFrameworkInit(instanceId) || isJSFrameworkInit()) {
       mWXBridge.markDirty(instanceId, ref, dirty);
     }
   }
